@@ -93,7 +93,7 @@ impl BlockCreationLoopMetrics {
                 "block-creation-loop-metrics",
                 (
                     "loop_count",
-                    self.loop_count.swap(0, Ordering::Relaxed),
+                    self.loop_count.load(Ordering::Relaxed),
                     i64
                 ),
                 (
