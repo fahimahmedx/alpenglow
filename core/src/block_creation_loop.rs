@@ -94,6 +94,7 @@ struct BlockCreationLoopMetrics {
     last_report: AtomicInterval,
     loop_count: AtomicUsize,
     replay_is_behind_count: AtomicUsize,
+    delay_after_replay_is_behind_elapsed: AtomicU64,
 }
 
 impl BlockCreationLoopMetrics {
@@ -114,6 +115,12 @@ impl BlockCreationLoopMetrics {
                 (
                     "replay_is_behind_count",
                     self.replay_is_behind_count.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "delay_after_replay_is_behind_elapsed",
+                    self.delay_after_replay_is_behind_elapsed
+                        .swap(0, Ordering::Relaxed),
                     i64
                 ),
             );
@@ -389,7 +396,9 @@ fn start_leader_retry_replay(
                 return Ok(());
             }
             Err(StartLeaderError::ReplayIsBehind(_)) => {
-                metrics.replay_is_behind_count.fetch_add(1, Ordering::Relaxed);
+                metrics
+                    .replay_is_behind_count
+                    .fetch_add(1, Ordering::Relaxed);
 
                 trace!(
                     "{my_pubkey}: Attempting to produce slot {slot}, however replay of the \
@@ -401,7 +410,9 @@ fn start_leader_retry_replay(
                     .highest_frozen_slot
                     .lock()
                     .unwrap();
+
                 // We wait until either we finish replay of the parent or the skip timer finishes
+                let mut wait_start = Measure::start("delay_after_replay_is_behind");
                 let _unused = ctx
                     .replay_highest_frozen
                     .freeze_notification
@@ -411,6 +422,10 @@ fn start_leader_retry_replay(
                         |hfs| *hfs < parent_slot,
                     )
                     .unwrap();
+                wait_start.stop();
+                metrics
+                    .delay_after_replay_is_behind_elapsed
+                    .fetch_add(wait_start.as_us(), Ordering::Relaxed);
             }
             Err(e) => return Err(e),
         }
