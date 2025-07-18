@@ -358,7 +358,7 @@ fn start_leader_retry_replay(
                 return Ok(());
             }
             Err(StartLeaderError::ReplayIsBehind(_)) => {
-                metrics.replay_is_behind_count += 1;
+                metrics.replay_is_behind_count.fetch_add(1, Ordering::Relaxed);
 
                 trace!(
                     "{my_pubkey}: Attempting to produce slot {slot}, however replay of the \
