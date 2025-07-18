@@ -456,6 +456,9 @@ fn start_leader_retry_replay(
         }
     }
 
+    metrics
+        .replay_is_behind_count
+        .fetch_add(1, Ordering::Relaxed);
     error!(
         "{my_pubkey}: Skipping production of {slot}: \
         Unable to replay parent {parent_slot} in time"
@@ -483,10 +486,16 @@ fn maybe_start_leader(
     }
 
     let Some(parent_bank) = ctx.bank_forks.read().unwrap().get(parent_slot) else {
+        metrics
+            .replay_is_behind_count
+            .fetch_add(1, Ordering::Relaxed);
         return Err(StartLeaderError::ReplayIsBehind(parent_slot));
     };
 
     if !parent_bank.is_frozen() {
+        metrics
+            .replay_is_behind_count
+            .fetch_add(1, Ordering::Relaxed);
         return Err(StartLeaderError::ReplayIsBehind(parent_slot));
     }
 
