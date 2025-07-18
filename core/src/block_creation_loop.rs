@@ -83,6 +83,8 @@ struct BlockCreationLoopMetrics {
     record_receiver_disconnected_count: AtomicUsize,
     startup_verification_incomplete_count: AtomicUsize,
     already_have_bank_count: AtomicUsize,
+
+    window_production_elapsed: AtomicU64,
 }
 
 impl BlockCreationLoopMetrics {
@@ -128,6 +130,11 @@ impl BlockCreationLoopMetrics {
                 (
                     "already_have_bank_count",
                     self.already_have_bank_count.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "window_production_elapsed",
+                    self.window_production_elapsed.swap(0, Ordering::Relaxed),
                     i64
                 ),
             );
@@ -295,6 +302,7 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
         }
 
         // Produce our window
+        let mut window_production_start = Measure::start("window_production");
         let mut slot = start_slot;
         // TODO(ashwin): Handle preemption of leader window during this loop
         while !exit.load(Ordering::Relaxed) {
@@ -355,6 +363,10 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                 break;
             }
         }
+        window_production_start.stop();
+        metrics
+            .window_production_elapsed
+            .fetch_add(window_production_start.as_us(), Ordering::Relaxed);
         metrics.loop_count.fetch_add(1, Ordering::Relaxed);
         metrics.report(1000);
     }
