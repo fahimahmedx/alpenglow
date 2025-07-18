@@ -82,6 +82,7 @@ struct BlockCreationLoopMetrics {
     record_receiver_timeout_count: AtomicUsize,
     record_receiver_disconnected_count: AtomicUsize,
     startup_verification_incomplete_count: AtomicUsize,
+    already_have_bank_count: AtomicUsize,
 }
 
 impl BlockCreationLoopMetrics {
@@ -122,6 +123,11 @@ impl BlockCreationLoopMetrics {
                     "startup_verification_incomplete_count",
                     self.startup_verification_incomplete_count
                         .swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "already_have_bank_count",
+                    self.already_have_bank_count.swap(0, Ordering::Relaxed),
                     i64
                 ),
             );
@@ -451,6 +457,9 @@ fn maybe_start_leader(
     metrics: &mut BlockCreationLoopMetrics,
 ) -> Result<(), StartLeaderError> {
     if ctx.bank_forks.read().unwrap().get(slot).is_some() {
+        metrics
+            .already_have_bank_count
+            .fetch_add(1, Ordering::Relaxed);
         return Err(StartLeaderError::AlreadyHaveBank(slot));
     }
 
