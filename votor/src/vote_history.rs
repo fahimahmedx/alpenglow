@@ -1,11 +1,9 @@
-#[cfg(feature = "frozen-abi")]
-use solana_frozen_abi_macro::{frozen_abi, AbiExample};
 use {
     super::vote_history_storage::{
         Result, SavedVoteHistory, SavedVoteHistoryVersions, VoteHistoryStorage,
     },
+    crate::Block,
     alpenglow_vote::vote::Vote,
-    serde::{Deserialize, Serialize},
     solana_sdk::{clock::Slot, hash::Hash, pubkey::Pubkey, signature::Keypair},
     std::collections::{HashMap, HashSet},
     thiserror::Error,
@@ -46,7 +44,7 @@ impl VoteHistoryVersions {
 #[cfg_attr(
     feature = "frozen-abi",
     derive(AbiExample),
-    frozen_abi(digest = "4sLtBmsxLrTBcqsZjxptttZyDB3k9wSS2cdT8rkrzdVM")
+    frozen_abi(digest = "4WTAsAmnfhUpYegpBCguZiANnMDZq9vMmzWzLrXdEn7N")
 )]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Default)]
 pub struct VoteHistory {
@@ -79,6 +77,12 @@ pub struct VoteHistory {
 
     /// All votes cast for a `slot`, for use in refresh
     votes_cast: HashMap<Slot, Vec<Vote>>,
+
+    /// Blocks which have a notarization certificate via the certificate pool
+    notarized_blocks: HashSet<Block>,
+
+    /// Slots which have a parent ready condition via the certificate pool
+    parent_ready_slots: HashMap<Slot, HashSet<Block>>,
 
     /// The latest root set by the voting loop. The above structures will not
     /// contain votes for slots before `root`
@@ -132,10 +136,36 @@ impl VoteHistory {
         self.its_over.contains(&slot)
     }
 
-    /// All votes in a slot, for use in refresh
-    pub fn votes_cast(&self, slot: Slot) -> Vec<Vote> {
+    /// All votes cast since `slot` including `slot`, for use in
+    /// refresh
+    pub fn votes_cast_since(&self, slot: Slot) -> Vec<Vote> {
+        self.votes_cast
+            .iter()
+            .filter(|(&s, _)| s >= slot)
+            .flat_map(|(_, votes)| votes.iter())
+            .cloned()
+            .collect()
+    }
+
+    /// Have we casted a bad window vote for `slot`:
+    /// - Skip
+    /// - Notarize fallback
+    /// - Skip fallback
+    pub fn bad_window(&self, slot: Slot) -> bool {
         assert!(slot >= self.root);
-        self.votes_cast.get(&slot).cloned().unwrap_or_default()
+        self.skipped.contains(&slot)
+            || self.voted_notar_fallback.contains_key(&slot)
+            || self.voted_skip_fallback.contains(&slot)
+    }
+
+    pub fn is_block_notarized(&self, block: &Block) -> bool {
+        self.notarized_blocks.contains(block)
+    }
+
+    pub fn is_parent_ready(&self, slot: Slot, parent: &Block) -> bool {
+        self.parent_ready_slots
+            .get(&slot)
+            .is_some_and(|ps| ps.contains(parent))
     }
 
     /// The latest root slot set by the voting loop
@@ -183,6 +213,25 @@ impl VoteHistory {
         self.votes_cast.entry(vote.slot()).or_default().push(vote);
     }
 
+    /// Add a new notarized block
+    pub fn add_block_notarized(&mut self, block @ (slot, _, _): Block) {
+        if slot < self.root {
+            return;
+        }
+        self.notarized_blocks.insert(block);
+    }
+
+    /// Add a new parent ready slot
+    pub fn add_parent_ready(&mut self, slot: Slot, parent: Block) {
+        if slot < self.root {
+            return;
+        }
+        self.parent_ready_slots
+            .entry(slot)
+            .or_default()
+            .insert(parent);
+    }
+
     /// Sets the new root slot and cleans up outdated slots < `root`
     pub fn set_root(&mut self, root: Slot) {
         self.root = root;
@@ -193,6 +242,8 @@ impl VoteHistory {
         self.skipped.retain(|s| *s >= root);
         self.its_over.retain(|s| *s >= root);
         self.votes_cast.retain(|s, _| *s >= root);
+        self.notarized_blocks.retain(|(s, _, _)| *s >= root);
+        self.parent_ready_slots.retain(|s, _| *s >= root);
     }
 
     #[allow(dead_code)]

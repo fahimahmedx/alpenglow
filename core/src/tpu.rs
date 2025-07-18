@@ -31,8 +31,7 @@ use {
     solana_client::connection_cache::ConnectionCache,
     solana_gossip::cluster_info::ClusterInfo,
     solana_ledger::{
-        blockstore::{Blockstore, CompletedBlockSender},
-        blockstore_processor::TransactionStatusSender,
+        blockstore::Blockstore, blockstore_processor::TransactionStatusSender,
         entry_notifier_service::EntryNotifierSender,
     },
     solana_perf::data_budget::DataBudget,
@@ -55,6 +54,7 @@ use {
         streamer::StakedNodes,
     },
     solana_turbine::broadcast_stage::{BroadcastStage, BroadcastStageType},
+    solana_votor::event::CompletedBlockSender,
     std::{
         collections::HashMap,
         net::{SocketAddr, UdpSocket},
@@ -263,7 +263,11 @@ impl Tpu {
         };
 
         let alpenglow_sigverify_stage = {
-            let verifier = BLSSigVerifier::new(bls_verified_message_sender);
+            let verifier = BLSSigVerifier::new(
+                bank_forks.clone(),
+                verified_vote_sender.clone(),
+                bls_verified_message_sender,
+            );
             SigVerifyStage::new(
                 bls_packet_receiver,
                 verifier,
