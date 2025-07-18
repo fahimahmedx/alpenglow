@@ -81,6 +81,7 @@ struct BlockCreationLoopMetrics {
     delay_after_replay_is_behind_elapsed: AtomicU64,
     record_receiver_timeout_count: AtomicUsize,
     record_receiver_disconnected_count: AtomicUsize,
+    startup_verification_incomplete_count: AtomicUsize,
 }
 
 impl BlockCreationLoopMetrics {
@@ -114,6 +115,12 @@ impl BlockCreationLoopMetrics {
                 (
                     "record_receiver_disconnected_count",
                     self.record_receiver_disconnected_count
+                        .swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "startup_verification_incomplete_count",
+                    self.startup_verification_incomplete_count
                         .swap(0, Ordering::Relaxed),
                     i64
                 ),
@@ -378,7 +385,7 @@ fn start_leader_retry_replay(
     let my_pubkey = ctx.my_pubkey;
     let timeout = block_timeout(leader_slot_index(slot));
     while !timeout.saturating_sub(skip_timer.elapsed()).is_zero() {
-        match maybe_start_leader(slot, parent_slot, ctx) {
+        match maybe_start_leader(slot, parent_slot, ctx, metrics) {
             Ok(()) => {
                 return Ok(());
             }
@@ -438,6 +445,7 @@ fn maybe_start_leader(
     slot: Slot,
     parent_slot: Slot,
     ctx: &LeaderContext,
+    metrics: &mut BlockCreationLoopMetrics,
 ) -> Result<(), StartLeaderError> {
     if ctx.bank_forks.read().unwrap().get(slot).is_some() {
         return Err(StartLeaderError::AlreadyHaveBank(slot));
@@ -452,6 +460,9 @@ fn maybe_start_leader(
     }
 
     if !parent_bank.has_initial_accounts_hash_verification_completed() {
+        metrics
+            .startup_verification_incomplete_count
+            .fetch_add(1, Ordering::Relaxed);
         return Err(StartLeaderError::StartupVerificationIncomplete(parent_slot));
     }
 
