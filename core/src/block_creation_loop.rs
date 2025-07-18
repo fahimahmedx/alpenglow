@@ -75,31 +75,32 @@ pub struct ReplayHighestFrozen {
 
 #[derive(Default)]
 struct BlockCreationLoopMetrics {
-    last_submit: u64,
-    loop_count: u64,
-    replay_is_behind_count: u64,
+    last_report: AtomicInterval,
+    loop_count: AtomicUsize,
+    replay_is_behind_count: AtomicUsize,
 }
 
 impl BlockCreationLoopMetrics {
-    fn update(&mut self, replay_is_behind_count: u64) {
-        self.loop_count += 1;
-        self.replay_is_behind_count = replay_is_behind_count;
-        self.maybe_submit();
-    }
+    fn report(&mut self, report_interval_ms: u64) {
+        // skip reporting metrics if stats is empty
+        if self.is_empty() {
+            return;
+        }
 
-    fn maybe_submit(&mut self) {
-        let now = timestamp();
-        let elapsed_ms = now - self.last_submit;
-
-        if elapsed_ms > 1000 {
+        if self.last_report.should_update(report_interval_ms) {
             datapoint_info!(
                 "block-creation-loop-metrics",
-                ("loop_count", self.loop_count, i64),
-                ("replay_is_behind_count", self.replay_is_behind_count, i64),
+                (
+                    "loop_count",
+                    self.loop_count.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "replay_is_behind_count",
+                    self.replay_is_behind_count.swap(0, Ordering::Relaxed),
+                    i64
+                ),
             );
-            
-            *self = BlockCreationLoopMetrics::default();
-            self.last_submit = now;
         }
     }
 }
@@ -244,7 +245,9 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
             parent: {parent_slot}"
         );
 
-        if let Err(e) = start_leader_retry_replay(start_slot, parent_slot, skip_timer, &ctx, &mut metrics) {
+        if let Err(e) =
+            start_leader_retry_replay(start_slot, parent_slot, skip_timer, &ctx, &mut metrics)
+        {
             // Give up on this leader window
             error!(
                 "{my_pubkey}: Unable to produce first slot {start_slot}, skipping production of our entire leader window \
@@ -307,13 +310,15 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
 
             // Although `slot - 1`has been cleared from `poh_recorder`, it might not have finished processing in
             // `replay_stage`, which is why we use `start_leader_retry_replay`
-            if let Err(e) = start_leader_retry_replay(slot, slot - 1, skip_timer, &ctx, &mut metrics) {
+            if let Err(e) =
+                start_leader_retry_replay(slot, slot - 1, skip_timer, &ctx, &mut metrics)
+            {
                 error!("{my_pubkey}: Unable to produce {slot}, skipping rest of leader window {slot} - {end_slot}: {e:?}");
                 break;
             }
         }
-        metrics.loop_count += 1;
-        metrics.maybe_submit();
+        metrics.loop_count.fetch_add(1, Ordering::Relaxed);
+        metrics.report(1000);
     }
 
     receive_record_loop.join().unwrap();
@@ -354,7 +359,7 @@ fn start_leader_retry_replay(
             }
             Err(StartLeaderError::ReplayIsBehind(_)) => {
                 metrics.replay_is_behind_count += 1;
-                
+
                 trace!(
                     "{my_pubkey}: Attempting to produce slot {slot}, however replay of the \
                     the parent {parent_slot} is not yet finished, waiting. Skip timer {}",
