@@ -81,6 +81,8 @@ struct BlockCreationLoopMetrics {
     replay_is_behind_count: AtomicUsize,
     startup_verification_incomplete_count: AtomicUsize,
     already_have_bank_count: AtomicUsize,
+    bank_timeout_completion_count: AtomicUsize,
+    bank_filled_completion_count: AtomicUsize,
 
     replay_is_behind_wait_elapsed: AtomicU64,
     window_production_elapsed: AtomicU64,
@@ -96,6 +98,8 @@ impl BlockCreationLoopMetrics {
                 .startup_verification_incomplete_count
                 .load(Ordering::Relaxed) as u64
             + self.already_have_bank_count.load(Ordering::Relaxed) as u64
+            + self.bank_timeout_completion_count.load(Ordering::Relaxed) as u64
+            + self.bank_filled_completion_count.load(Ordering::Relaxed) as u64
             + self.replay_is_behind_wait_elapsed.load(Ordering::Relaxed) as u64
             + self.window_production_elapsed.load(Ordering::Relaxed) as u64
             + self.slot_production_elapsed_hist.entries() as u64
@@ -126,6 +130,17 @@ impl BlockCreationLoopMetrics {
                 (
                     "already_have_bank_count",
                     self.already_have_bank_count.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "bank_timeout_completion_count",
+                    self.bank_timeout_completion_count
+                        .swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "bank_filled_completion_count",
+                    self.bank_filled_completion_count.swap(0, Ordering::Relaxed),
                     i64
                 ),
                 (
@@ -372,6 +387,12 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                         bank.collector_id(),
                         bank.slot()
                     );
+
+                    // Record timeout completion metric
+                    metrics
+                        .bank_timeout_completion_count
+                        .fetch_add(1, Ordering::Relaxed);
+
                     let max_tick_height = bank.max_tick_height();
                     // Set the tick height for the bank to max_tick_height - 1, so that PohRecorder::flush_cache()
                     // will properly increment the tick_height to max_tick_height.
@@ -384,6 +405,11 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                     w_poh_recorder.tick_alpenglow(max_tick_height);
                 } else {
                     trace!("{my_pubkey}: {slot} reached max tick height, moving to next block");
+
+                    // Record filled completion metric
+                    metrics
+                        .bank_filled_completion_count
+                        .fetch_add(1, Ordering::Relaxed);
                 }
             }
 
