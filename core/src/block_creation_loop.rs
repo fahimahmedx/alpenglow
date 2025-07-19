@@ -394,13 +394,14 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                 }
             }
 
+            // Assert that the bank has been cleared
+            assert!(!poh_recorder.read().unwrap().has_bank());
+
             // Record bank completion time
             bank_completion_measure.stop();
             let _ = metrics
                 .bank_completion_elapsed_hist
                 .increment(bank_completion_measure.as_us());
-
-            assert!(!poh_recorder.read().unwrap().has_bank());
 
             // Produce our next slot
             slot += 1;
