@@ -79,12 +79,12 @@ struct BlockCreationLoopMetrics {
     last_report: AtomicInterval,
     loop_count: AtomicUsize,
     replay_is_behind_count: AtomicUsize,
-    delay_after_replay_is_behind_elapsed: AtomicU64,
     record_receiver_timeout_count: AtomicUsize,
     record_receiver_disconnected_count: AtomicUsize,
     startup_verification_incomplete_count: AtomicUsize,
     already_have_bank_count: AtomicUsize,
 
+    replay_is_behind_wait_elapsed: AtomicU64,
     window_production_elapsed: AtomicU64,
     slot_production_elapsed_hist: histogram::Histogram,
 }
@@ -93,9 +93,6 @@ impl BlockCreationLoopMetrics {
     fn is_empty(&self) -> bool {
         0 == self.loop_count.load(Ordering::Relaxed) as u64
             + self.replay_is_behind_count.load(Ordering::Relaxed) as u64
-            + self
-                .delay_after_replay_is_behind_elapsed
-                .load(Ordering::Relaxed) as u64
             + self.record_receiver_timeout_count.load(Ordering::Relaxed) as u64
             + self
                 .record_receiver_disconnected_count
@@ -104,6 +101,7 @@ impl BlockCreationLoopMetrics {
                 .startup_verification_incomplete_count
                 .load(Ordering::Relaxed) as u64
             + self.already_have_bank_count.load(Ordering::Relaxed) as u64
+            + self.replay_is_behind_wait_elapsed.load(Ordering::Relaxed) as u64
             + self.window_production_elapsed.load(Ordering::Relaxed) as u64
             + self.slot_production_elapsed_hist.entries() as u64
     }
@@ -121,12 +119,6 @@ impl BlockCreationLoopMetrics {
                 (
                     "replay_is_behind_count",
                     self.replay_is_behind_count.swap(0, Ordering::Relaxed),
-                    i64
-                ),
-                (
-                    "delay_after_replay_is_behind_elapsed",
-                    self.delay_after_replay_is_behind_elapsed
-                        .swap(0, Ordering::Relaxed),
                     i64
                 ),
                 (
@@ -150,6 +142,12 @@ impl BlockCreationLoopMetrics {
                 (
                     "already_have_bank_count",
                     self.already_have_bank_count.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "replay_is_behind_wait_elapsed",
+                    self.replay_is_behind_wait_elapsed
+                        .swap(0, Ordering::Relaxed),
                     i64
                 ),
                 (
@@ -474,7 +472,7 @@ fn start_leader_retry_replay(
                     .unwrap();
 
                 // We wait until either we finish replay of the parent or the skip timer finishes
-                let mut wait_start = Measure::start("delay_after_replay_is_behind");
+                let mut wait_start = Measure::start("replay_is_behind");
                 let _unused = ctx
                     .replay_highest_frozen
                     .freeze_notification
@@ -486,7 +484,7 @@ fn start_leader_retry_replay(
                     .unwrap();
                 wait_start.stop();
                 metrics
-                    .delay_after_replay_is_behind_elapsed
+                    .replay_is_behind_wait_elapsed
                     .fetch_add(wait_start.as_us(), Ordering::Relaxed);
             }
             Err(e) => return Err(e),
