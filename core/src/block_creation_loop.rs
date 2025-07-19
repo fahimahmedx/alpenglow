@@ -75,20 +75,6 @@ pub struct ReplayHighestFrozen {
     pub freeze_notification: Condvar,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub struct LeaderWindowInfo {
-    pub start_slot: Slot,
-    pub end_slot: Slot,
-    pub parent_block: Block,
-    pub skip_timer: Instant,
-}
-
-#[derive(Default)]
-pub struct LeaderWindowNotifier {
-    pub window_info: Mutex<Option<LeaderWindowInfo>>,
-    pub window_notification: Condvar,
-}
-
 #[derive(Default)]
 struct BlockCreationLoopMetrics {
     last_report: AtomicInterval,
