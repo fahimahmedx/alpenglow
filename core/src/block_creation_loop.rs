@@ -106,6 +106,24 @@ struct BlockCreationLoopMetrics {
 }
 
 impl BlockCreationLoopMetrics {
+    fn is_empty(&self) -> bool {
+        0 == self.loop_count.load(Ordering::Relaxed) as u64
+            + self.replay_is_behind_count.load(Ordering::Relaxed) as u64
+            + self
+                .delay_after_replay_is_behind_elapsed
+                .load(Ordering::Relaxed) as u64
+            + self.record_receiver_timeout_count.load(Ordering::Relaxed) as u64
+            + self
+                .record_receiver_disconnected_count
+                .load(Ordering::Relaxed) as u64
+            + self
+                .startup_verification_incomplete_count
+                .load(Ordering::Relaxed) as u64
+            + self.already_have_bank_count.load(Ordering::Relaxed) as u64
+            + self.window_production_elapsed.load(Ordering::Relaxed) as u64
+            + self.slot_production_elapsed_hist.entries() as u64
+    }
+
     fn report(&mut self, report_interval_ms: u64) {
         // skip reporting metrics if stats is empty
         if self.is_empty() {
