@@ -85,6 +85,7 @@ struct BlockCreationLoopMetrics {
     replay_is_behind_wait_elapsed: AtomicU64,
     window_production_elapsed: AtomicU64,
     slot_production_elapsed_hist: histogram::Histogram,
+    bank_completion_elapsed_hist: histogram::Histogram,
 }
 
 impl BlockCreationLoopMetrics {
@@ -98,6 +99,7 @@ impl BlockCreationLoopMetrics {
             + self.replay_is_behind_wait_elapsed.load(Ordering::Relaxed) as u64
             + self.window_production_elapsed.load(Ordering::Relaxed) as u64
             + self.slot_production_elapsed_hist.entries() as u64
+            + self.bank_completion_elapsed_hist.entries() as u64
     }
 
     fn report(&mut self, report_interval_ms: u64) {
@@ -157,6 +159,28 @@ impl BlockCreationLoopMetrics {
                 (
                     "slot_production_elapsed_max",
                     self.slot_production_elapsed_hist.maximum().unwrap_or(0),
+                    i64
+                ),
+                (
+                    "bank_completion_elapsed_90pct",
+                    self.bank_completion_elapsed_hist
+                        .percentile(90.0)
+                        .unwrap_or(0),
+                    i64
+                ),
+                (
+                    "bank_completion_elapsed_mean",
+                    self.bank_completion_elapsed_hist.mean().unwrap_or(0),
+                    i64
+                ),
+                (
+                    "bank_completion_elapsed_min",
+                    self.bank_completion_elapsed_hist.minimum().unwrap_or(0),
+                    i64
+                ),
+                (
+                    "bank_completion_elapsed_max",
+                    self.bank_completion_elapsed_hist.maximum().unwrap_or(0),
                     i64
                 ),
             );
@@ -330,6 +354,10 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                 "{my_pubkey}: waiting for leader bank {slot} to finish, remaining time: {}",
                 remaining_slot_time.as_millis(),
             );
+
+            // Start measuring bank completion time
+            let mut bank_completion_measure = Measure::start("bank_completion");
+
             leader_bank_notifier.wait_for_completed(remaining_slot_time);
 
             // Time to complete the bank, there are two possibilities:
@@ -358,6 +386,12 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                     trace!("{my_pubkey}: {slot} reached max tick height, moving to next block");
                 }
             }
+
+            // Record bank completion time
+            bank_completion_measure.stop();
+            let _ = metrics
+                .bank_completion_elapsed_hist
+                .increment(bank_completion_measure.as_us());
 
             assert!(!poh_recorder.read().unwrap().has_bank());
 
