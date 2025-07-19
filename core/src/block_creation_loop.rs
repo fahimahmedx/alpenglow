@@ -414,10 +414,9 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
 
             // Record individual slot production time
             slot_production_start.stop();
-            metrics
+            let _ = metrics
                 .slot_production_elapsed_hist
-                .increment(slot_production_start.as_us())
-                .unwrap();
+                .increment(slot_production_start.as_us());
         }
         window_production_start.stop();
         metrics
