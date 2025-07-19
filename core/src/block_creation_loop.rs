@@ -14,6 +14,7 @@ use {
         blockstore::Blockstore, leader_schedule_cache::LeaderScheduleCache,
         leader_schedule_utils::leader_slot_index,
     },
+    solana_measure::measure::Measure,
     solana_metrics::datapoint_info,
     solana_poh::poh_recorder::{PohRecorder, Record, GRACE_TICKS_FACTOR, MAX_GRACE_SLOTS},
     solana_pubkey::Pubkey,
@@ -25,7 +26,7 @@ use {
     solana_votor::{block_timeout, event::LeaderWindowInfo, votor::LeaderWindowNotifier},
     std::{
         sync::{
-            atomic::{AtomicBool, Ordering},
+            atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
             Arc, Condvar, Mutex, RwLock,
         },
         thread,
@@ -85,6 +86,7 @@ struct BlockCreationLoopMetrics {
     already_have_bank_count: AtomicUsize,
 
     window_production_elapsed: AtomicU64,
+    slot_production_elapsed_hist: histogram::Histogram,
 }
 
 impl BlockCreationLoopMetrics {
@@ -135,6 +137,28 @@ impl BlockCreationLoopMetrics {
                 (
                     "window_production_elapsed",
                     self.window_production_elapsed.swap(0, Ordering::Relaxed),
+                    i64
+                ),
+                (
+                    "slot_production_elapsed_90pct",
+                    self.slot_production_elapsed_hist
+                        .percentile(90.0)
+                        .unwrap_or(0),
+                    i64
+                ),
+                (
+                    "slot_production_elapsed_mean",
+                    self.slot_production_elapsed_hist.mean().unwrap_or(0),
+                    i64
+                ),
+                (
+                    "slot_production_elapsed_min",
+                    self.slot_production_elapsed_hist.minimum().unwrap_or(0),
+                    i64
+                ),
+                (
+                    "slot_production_elapsed_max",
+                    self.slot_production_elapsed_hist.maximum().unwrap_or(0),
                     i64
                 ),
             );
@@ -353,6 +377,7 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                 trace!("{my_pubkey}: finished leader window {start_slot}-{end_slot}");
                 break;
             }
+            let mut slot_production_start = Measure::start("slot_production");
 
             // Although `slot - 1`has been cleared from `poh_recorder`, it might not have finished processing in
             // `replay_stage`, which is why we use `start_leader_retry_replay`
@@ -362,6 +387,13 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                 error!("{my_pubkey}: Unable to produce {slot}, skipping rest of leader window {slot} - {end_slot}: {e:?}");
                 break;
             }
+
+            // Record individual slot production time
+            slot_production_start.stop();
+            metrics
+                .slot_production_elapsed_hist
+                .increment(slot_production_start.as_us())
+                .unwrap();
         }
         window_production_start.stop();
         metrics
