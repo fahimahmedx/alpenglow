@@ -80,8 +80,6 @@ struct BlockCreationLoopMetrics {
     last_report: AtomicInterval,
     loop_count: AtomicUsize,
     replay_is_behind_count: AtomicUsize,
-    record_receiver_timeout_count: AtomicUsize,
-    record_receiver_disconnected_count: AtomicUsize,
     startup_verification_incomplete_count: AtomicUsize,
     already_have_bank_count: AtomicUsize,
 
@@ -94,10 +92,6 @@ impl BlockCreationLoopMetrics {
     fn is_empty(&self) -> bool {
         0 == self.loop_count.load(Ordering::Relaxed) as u64
             + self.replay_is_behind_count.load(Ordering::Relaxed) as u64
-            + self.record_receiver_timeout_count.load(Ordering::Relaxed) as u64
-            + self
-                .record_receiver_disconnected_count
-                .load(Ordering::Relaxed) as u64
             + self
                 .startup_verification_incomplete_count
                 .load(Ordering::Relaxed) as u64
@@ -120,18 +114,6 @@ impl BlockCreationLoopMetrics {
                 (
                     "replay_is_behind_count",
                     self.replay_is_behind_count.swap(0, Ordering::Relaxed),
-                    i64
-                ),
-                (
-                    "record_receiver_timeout_count",
-                    self.record_receiver_timeout_count
-                        .swap(0, Ordering::Relaxed),
-                    i64
-                ),
-                (
-                    "record_receiver_disconnected_count",
-                    self.record_receiver_disconnected_count
-                        .swap(0, Ordering::Relaxed),
                     i64
                 ),
                 (
@@ -206,7 +188,6 @@ fn start_receive_and_record_loop(
     exit: Arc<AtomicBool>,
     poh_recorder: Arc<RwLock<PohRecorder>>,
     record_receiver: Receiver<Record>,
-    metrics: &mut BlockCreationLoopMetrics,
 ) {
     while !exit.load(Ordering::Relaxed) {
         // We need a timeout here to check the exit flag, chose 400ms
@@ -227,16 +208,9 @@ fn start_receive_and_record_loop(
             }
             Err(RecvTimeoutError::Disconnected) => {
                 info!("Record receiver disconnected");
-                metrics
-                    .record_receiver_disconnected_count
-                    .fetch_add(1, Ordering::Relaxed);
                 return;
             }
-            Err(RecvTimeoutError::Timeout) => {
-                metrics
-                    .record_receiver_timeout_count
-                    .fetch_add(1, Ordering::Relaxed);
-            }
+            Err(RecvTimeoutError::Timeout) => (),
         }
     }
 }
@@ -292,7 +266,7 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
     let exit_c = exit.clone();
     let p_rec = poh_recorder.clone();
     let receive_record_loop = thread::spawn(move || {
-        start_receive_and_record_loop(exit_c, p_rec, record_receiver, &mut metrics);
+        start_receive_and_record_loop(exit_c, p_rec, record_receiver);
     });
 
     while !exit.load(Ordering::Relaxed) {
