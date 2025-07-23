@@ -1,18 +1,24 @@
 #![cfg_attr(feature = "frozen-abi", feature(min_specialization))]
 use {
-    alpenglow_vote::vote::Vote,
+    alpenglow_vote::{
+        certificate::{Certificate, CertificateType},
+        vote::Vote,
+    },
     solana_sdk::{clock::Slot, hash::Hash},
     std::time::Duration,
 };
 
 pub mod certificate_pool;
+mod certificate_pool_service;
 pub mod commitment;
 pub mod event;
+mod event_handler;
 pub mod root_utils;
+mod skip_timer;
 pub mod vote_history;
 pub mod vote_history_storage;
-pub mod voting_loop;
 pub mod voting_utils;
+pub mod votor;
 
 #[macro_use]
 extern crate log;
@@ -87,6 +93,40 @@ impl CertificateId {
     /// NotarizeFallback certificate as well
     pub fn is_critical(&self) -> bool {
         matches!(self, Self::NotarizeFallback(_, _, _) | Self::Skip(_))
+    }
+}
+
+impl From<&Certificate> for CertificateId {
+    fn from(certificate: &Certificate) -> Self {
+        match certificate.certificate_type {
+            CertificateType::Finalize => CertificateId::Finalize(certificate.slot),
+            CertificateType::FinalizeFast => CertificateId::FinalizeFast(
+                certificate.slot,
+                certificate
+                    .block_id
+                    .expect("FinalizeFast must have block_id"),
+                certificate
+                    .replayed_bank_hash
+                    .expect("FinalizeFast must have bank_hash"),
+            ),
+            CertificateType::Notarize => CertificateId::Notarize(
+                certificate.slot,
+                certificate.block_id.expect("Notarize must have block_id"),
+                certificate
+                    .replayed_bank_hash
+                    .expect("Notarize must have bank_hash"),
+            ),
+            CertificateType::NotarizeFallback => CertificateId::NotarizeFallback(
+                certificate.slot,
+                certificate
+                    .block_id
+                    .expect("NotarizeFallback must have block_id"),
+                certificate
+                    .replayed_bank_hash
+                    .expect("NotarizeFallback must have bank_hash"),
+            ),
+            CertificateType::Skip => CertificateId::Skip(certificate.slot),
+        }
     }
 }
 
@@ -174,6 +214,8 @@ pub const SAFE_TO_NOTAR_MIN_NOTARIZE_FOR_NOTARIZE_OR_SKIP: f64 = 0.2;
 pub const SAFE_TO_NOTAR_MIN_NOTARIZE_AND_SKIP: f64 = 0.6;
 
 pub const SAFE_TO_SKIP_THRESHOLD: f64 = 0.4;
+
+pub const STANDSTILL_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Alpenglow block constants
 /// The amount of time a leader has to build their block
