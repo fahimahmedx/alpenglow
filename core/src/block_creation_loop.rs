@@ -346,10 +346,6 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
             parent: {parent_slot}"
         );
 
-        assert!(
-            first_in_leader_window(start_slot),
-            "{start_slot} was not first in leader window but voting loop notified us"
-        );
         if let Err(e) =
             start_leader_retry_replay(start_slot, parent_slot, skip_timer, &ctx, &mut metrics)
         {
