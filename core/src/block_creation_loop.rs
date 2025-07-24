@@ -101,10 +101,10 @@ impl BlockCreationLoopMetrics {
             + self.already_have_bank_count.load(Ordering::Relaxed) as u64
             + self.bank_timeout_completion_count.load(Ordering::Relaxed) as u64
             + self.bank_filled_completion_count.load(Ordering::Relaxed) as u64
-            + self.replay_is_behind_wait_elapsed.load(Ordering::Relaxed) as u64
-            + self.window_production_elapsed.load(Ordering::Relaxed) as u64
-            + self.slot_production_elapsed_hist.entries() as u64
-            + self.bank_completion_elapsed_hist.entries() as u64
+            + self.replay_is_behind_wait_elapsed.load(Ordering::Relaxed)
+            + self.window_production_elapsed.load(Ordering::Relaxed)
+            + self.slot_production_elapsed_hist.entries()
+            + self.bank_completion_elapsed_hist.entries()
     }
 
     fn report(&mut self, report_interval_ms: u64) {
