@@ -436,7 +436,6 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                 trace!("{my_pubkey}: finished leader window {start_slot}-{end_slot}");
                 break;
             }
-            let mut slot_production_start = Measure::start("slot_production");
 
             // Although `slot - 1`has been cleared from `poh_recorder`, it might not have finished processing in
             // `replay_stage`, which is why we use `start_leader_retry_replay`
@@ -446,12 +445,6 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                 error!("{my_pubkey}: Unable to produce {slot}, skipping rest of leader window {slot} - {end_slot}: {e:?}");
                 break;
             }
-
-            // Record individual slot production time
-            slot_production_start.stop();
-            let _ = metrics
-                .slot_production_elapsed_hist
-                .increment(slot_production_start.as_us());
         }
         window_production_start.stop();
         metrics
@@ -492,9 +485,16 @@ fn start_leader_retry_replay(
 ) -> Result<(), StartLeaderError> {
     let my_pubkey = ctx.my_pubkey;
     let timeout = block_timeout(leader_slot_index(slot));
+    let mut slot_production_start = Measure::start("slot_production");
     while !timeout.saturating_sub(skip_timer.elapsed()).is_zero() {
         match maybe_start_leader(slot, parent_slot, ctx, metrics) {
             Ok(()) => {
+                // Record successful slot production time
+                slot_production_start.stop();
+                let _ = metrics
+                    .slot_production_elapsed_hist
+                    .increment(slot_production_start.as_us());
+
                 return Ok(());
             }
             Err(StartLeaderError::ReplayIsBehind(_)) => {
