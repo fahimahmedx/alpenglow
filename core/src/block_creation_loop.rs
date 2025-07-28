@@ -87,7 +87,7 @@ struct BlockCreationLoopMetrics {
 
     replay_is_behind_wait_elapsed: AtomicU64,
     window_production_elapsed: AtomicU64,
-    slot_production_elapsed_hist: histogram::Histogram,
+    slot_delay_hist: histogram::Histogram,
     bank_completion_elapsed_hist: histogram::Histogram,
 }
 
@@ -103,7 +103,7 @@ impl BlockCreationLoopMetrics {
             + self.bank_filled_completion_count.load(Ordering::Relaxed) as u64
             + self.replay_is_behind_wait_elapsed.load(Ordering::Relaxed)
             + self.window_production_elapsed.load(Ordering::Relaxed)
-            + self.slot_production_elapsed_hist.entries()
+            + self.slot_delay_hist.entries()
             + self.bank_completion_elapsed_hist.entries()
     }
 
@@ -159,25 +159,23 @@ impl BlockCreationLoopMetrics {
                     i64
                 ),
                 (
-                    "slot_production_elapsed_90pct",
-                    self.slot_production_elapsed_hist
-                        .percentile(90.0)
-                        .unwrap_or(0),
+                    "slot_delay_90pct",
+                    self.slot_delay_hist.percentile(90.0).unwrap_or(0),
                     i64
                 ),
                 (
-                    "slot_production_elapsed_mean",
-                    self.slot_production_elapsed_hist.mean().unwrap_or(0),
+                    "slot_delay_mean",
+                    self.slot_delay_hist.mean().unwrap_or(0),
                     i64
                 ),
                 (
-                    "slot_production_elapsed_min",
-                    self.slot_production_elapsed_hist.minimum().unwrap_or(0),
+                    "slot_delay_min",
+                    self.slot_delay_hist.minimum().unwrap_or(0),
                     i64
                 ),
                 (
-                    "slot_production_elapsed_max",
-                    self.slot_production_elapsed_hist.maximum().unwrap_or(0),
+                    "slot_delay_max",
+                    self.slot_delay_hist.maximum().unwrap_or(0),
                     i64
                 ),
                 (
@@ -205,7 +203,7 @@ impl BlockCreationLoopMetrics {
             );
 
             // .swap() resetted most of the metrics to 0, but not the histograms or non-atomic values. reset them.
-            self.slot_production_elapsed_hist.clear();
+            self.slot_delay_hist.clear();
             self.bank_completion_elapsed_hist.clear();
             self.last_report = now;
         }
@@ -488,15 +486,13 @@ fn start_leader_retry_replay(
 ) -> Result<(), StartLeaderError> {
     let my_pubkey = ctx.my_pubkey;
     let timeout = block_timeout(leader_slot_index(slot));
-    let mut slot_production_start = Measure::start("slot_production");
+    let mut slot_delay_start = Measure::start("slot_delay");
     while !timeout.saturating_sub(skip_timer.elapsed()).is_zero() {
         match maybe_start_leader(slot, parent_slot, ctx, metrics) {
             Ok(()) => {
-                // Record successful slot production time
-                slot_production_start.stop();
-                let _ = metrics
-                    .slot_production_elapsed_hist
-                    .increment(slot_production_start.as_us());
+                // Record delay for successful slot
+                slot_delay_start.stop();
+                let _ = metrics.slot_delay_hist.increment(slot_delay_start.as_us());
 
                 return Ok(());
             }
