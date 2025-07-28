@@ -78,7 +78,7 @@ pub struct ReplayHighestFrozen {
 #[derive(Default)]
 struct BlockCreationLoopMetrics {
     last_report: AtomicInterval,
-    loop_count: AtomicUsize,
+    loop_count: u64,
     replay_is_behind_count: AtomicUsize,
     startup_verification_incomplete_count: AtomicUsize,
     already_have_bank_count: AtomicUsize,
@@ -93,7 +93,7 @@ struct BlockCreationLoopMetrics {
 
 impl BlockCreationLoopMetrics {
     fn is_empty(&self) -> bool {
-        0 == self.loop_count.load(Ordering::Relaxed) as u64
+        0 == self.loop_count
             + self.replay_is_behind_count.load(Ordering::Relaxed) as u64
             + self
                 .startup_verification_incomplete_count
@@ -116,7 +116,7 @@ impl BlockCreationLoopMetrics {
         if self.last_report.should_update(report_interval_ms) {
             datapoint_info!(
                 "block-creation-loop-metrics",
-                ("loop_count", self.loop_count.load(Ordering::Relaxed), i64),
+                ("loop_count", self.loop_count, i64),
                 (
                     "replay_is_behind_count",
                     self.replay_is_behind_count.swap(0, Ordering::Relaxed),
@@ -452,7 +452,7 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
         metrics
             .window_production_elapsed
             .fetch_add(window_production_start.as_us(), Ordering::Relaxed);
-        metrics.loop_count.fetch_add(1, Ordering::Relaxed);
+        metrics.loop_count += 1;
         metrics.report(1000);
     }
 
