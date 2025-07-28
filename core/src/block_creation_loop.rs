@@ -202,6 +202,11 @@ impl BlockCreationLoopMetrics {
                     i64
                 ),
             );
+
+            // .swap() resetted most of the metrics to 0, but not the histograms or non-atomic values. reset them.
+            self.slot_production_elapsed_hist.clear();
+            self.bank_completion_elapsed_hist.clear();
+            self.last_report = now;
         }
     }
 }
