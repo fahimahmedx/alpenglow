@@ -21,7 +21,7 @@ use {
         bank::{Bank, NewBankOptions},
         bank_forks::BankForks,
     },
-    solana_sdk::{clock::Slot, pubkey::Pubkey, timing::AtomicInterval},
+    solana_sdk::{clock::Slot, pubkey::Pubkey, timing::timestamp},
     solana_votor::{block_timeout, event::LeaderWindowInfo, votor::LeaderWindowNotifier},
     std::{
         sync::{
@@ -77,7 +77,7 @@ pub struct ReplayHighestFrozen {
 
 #[derive(Default)]
 struct BlockCreationLoopMetrics {
-    last_report: AtomicInterval,
+    last_report: u64,
     loop_count: u64,
     replay_is_behind_count: AtomicUsize,
     startup_verification_incomplete_count: AtomicUsize,
@@ -113,7 +113,10 @@ impl BlockCreationLoopMetrics {
             return;
         }
 
-        if self.last_report.should_update(report_interval_ms) {
+        let now = timestamp();
+        let elapsed_ms = now - self.last_report;
+
+        if elapsed_ms > report_interval_ms {
             datapoint_info!(
                 "block-creation-loop-metrics",
                 ("loop_count", self.loop_count, i64),
