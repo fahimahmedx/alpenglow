@@ -10,7 +10,6 @@ use {
         perf_libs,
         recycler::Recycler,
     },
-    alpenglow_vote::id as alpenglow_vote_id,
     rayon::{prelude::*, ThreadPool},
     solana_hash::Hash,
     solana_message::{MESSAGE_HEADER_LENGTH, MESSAGE_VERSION_PREFIX},
@@ -18,6 +17,7 @@ use {
     solana_rayon_threadlimit::get_thread_count,
     solana_short_vec::decode_shortu16_len,
     solana_signature::Signature,
+    solana_vote::alpenglow::id as alpenglow_vote_id,
     std::{convert::TryFrom, mem::size_of},
 };
 
@@ -637,7 +637,7 @@ mod tests {
         crate::{
             packet::{to_packet_batches, Packet, PacketBatch, PACKETS_PER_BATCH},
             sigverify::{self, PacketOffsets},
-            test_tx::{new_test_alpenglow_vote_tx, new_test_vote_tx, test_multisig_tx, test_tx},
+            test_tx::{new_test_vote_tx, test_multisig_tx, test_tx},
         },
         bincode::{deserialize, serialize},
         curve25519_dalek::{edwards::CompressedEdwardsY, scalar::Scalar},
@@ -651,7 +651,6 @@ mod tests {
             iter::repeat_with,
             sync::atomic::{AtomicU64, Ordering},
         },
-        test_case::test_case,
     };
 
     const SIG_OFFSET: usize = 1;
@@ -1377,9 +1376,8 @@ mod tests {
         }
     }
 
-    #[test_case(true; "alpenglow")]
-    #[test_case(false; "towerbft")]
-    fn test_is_simple_vote_transaction_with_offsets(is_alpenglow: bool) {
+    #[test]
+    fn test_is_simple_vote_transaction_with_offsets() {
         solana_logger::setup();
         let mut rng = rand::thread_rng();
 
@@ -1388,11 +1386,7 @@ mod tests {
             let mut current_offset = 0usize;
             let mut batch = PacketBatch::default();
             batch.push(Packet::from_data(None, test_tx()).unwrap());
-            let tx = if is_alpenglow {
-                new_test_alpenglow_vote_tx(&mut rng)
-            } else {
-                new_test_vote_tx(&mut rng)
-            };
+            let tx = new_test_vote_tx(&mut rng);
             batch.push(Packet::from_data(None, tx).unwrap());
             batch.iter_mut().enumerate().for_each(|(index, packet)| {
                 let packet_offsets = do_get_packet_offsets(packet, current_offset).unwrap();

@@ -22,7 +22,6 @@ use {
         slot_stats::{ShredSource, SlotsStats},
         transaction_address_lookup_table_scanner::scan_transaction,
     },
-    alpenglow_vote::bls_message::CertificateMessage,
     assert_matches::debug_assert_matches,
     bincode::{deserialize, serialize},
     crossbeam_channel::{bounded, Receiver, Sender, TrySendError},
@@ -59,6 +58,7 @@ use {
         VersionedConfirmedBlock, VersionedConfirmedBlockWithEntries,
         VersionedTransactionWithStatusMeta,
     },
+    solana_vote::alpenglow::bls_message::CertificateMessage,
     std::{
         borrow::Cow,
         cell::RefCell,
@@ -4026,13 +4026,12 @@ impl Blockstore {
         &self,
         slot: Slot,
         block_id: Hash,
-        bank_hash: Hash,
         certificate: CertificateMessage,
     ) -> Result<()> {
         let mut certificates = self
             .slot_certificates(slot)?
             .unwrap_or(SlotCertificates::default());
-        certificates.add_notarization_fallback_certificate(block_id, bank_hash, certificate);
+        certificates.add_notarization_fallback_certificate(block_id, certificate);
         self.slot_certificates_cf.put(slot, &certificates)
     }
 

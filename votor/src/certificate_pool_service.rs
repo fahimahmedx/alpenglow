@@ -17,7 +17,6 @@ use {
         votor::Votor,
         CertificateId, STANDSTILL_TIMEOUT,
     },
-    alpenglow_vote::bls_message::{BLSMessage, CertificateMessage},
     crossbeam_channel::{select, RecvError, Sender, TrySendError},
     solana_ledger::{
         blockstore::Blockstore, leader_schedule_cache::LeaderScheduleCache,
@@ -28,6 +27,7 @@ use {
         root_bank_cache::RootBankCache, vote_sender_types::BLSVerifiedMessageReceiver,
     },
     solana_sdk::clock::Slot,
+    solana_vote::alpenglow::bls_message::{BLSMessage, CertificateMessage},
     stats::CertificatePoolServiceStats,
     std::{
         sync::{
@@ -109,7 +109,15 @@ impl CertificatePoolService {
             }
         }
         // Send new certificates to peers
-        for (i, certificate) in new_certificates_to_send.iter().enumerate() {
+        Self::send_certificates(bls_sender, new_certificates_to_send, stats)
+    }
+
+    fn send_certificates(
+        bls_sender: &Sender<BLSOp>,
+        certificates_to_send: Vec<Arc<CertificateMessage>>,
+        stats: &mut CertificatePoolServiceStats,
+    ) -> Result<(), AddVoteError> {
+        for (i, certificate) in certificates_to_send.iter().enumerate() {
             // The buffer should normally be large enough, so we don't handle
             // certificate re-send here.
             match bls_sender.try_send(BLSOp::PushCertificate {
@@ -122,7 +130,7 @@ impl CertificatePoolService {
                     return Err(AddVoteError::VotingServiceSenderDisconnected);
                 }
                 Err(TrySendError::Full(_)) => {
-                    let dropped = new_certificates_to_send.len().saturating_sub(i) as u16;
+                    let dropped = certificates_to_send.len().saturating_sub(i) as u16;
                     stats.certificates_dropped = stats.certificates_dropped.saturating_add(dropped);
                     return Err(AddVoteError::VotingServiceQueueFull);
                 }
@@ -207,11 +215,7 @@ impl CertificatePoolService {
 
         // Kick off parent ready
         let root_bank = ctx.root_bank_cache.root_bank();
-        let root_block = (
-            root_bank.slot(),
-            root_bank.block_id().unwrap_or_default(),
-            root_bank.hash(),
-        );
+        let root_block = (root_bank.slot(), root_bank.block_id().unwrap_or_default());
         let mut highest_parent_ready = root_bank.slot();
         events.push(VotorEvent::ParentReady {
             slot: root_bank.slot().checked_add(1).unwrap(),
@@ -233,6 +237,20 @@ impl CertificatePoolService {
                 events.push(VotorEvent::Standstill(highest_finalized_slot));
                 stats.standstill = true;
                 standstill_timer = Instant::now();
+                if Err(AddVoteError::VotingServiceSenderDisconnected)
+                    == Self::send_certificates(
+                        &ctx.bls_sender,
+                        cert_pool.get_certs_for_standstill(),
+                        &mut stats,
+                    )
+                {
+                    info!(
+                        "{}: Voting service sender disconnected. Exiting.",
+                        ctx.my_pubkey
+                    );
+                    ctx.exit.store(true, Ordering::Relaxed);
+                    return Ok(());
+                }
             }
 
             if events
@@ -276,6 +294,7 @@ impl CertificatePoolService {
                 }
             }
             stats.maybe_report();
+            cert_pool.maybe_report();
         }
         Ok(())
     }
