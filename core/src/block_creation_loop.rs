@@ -25,7 +25,7 @@ use {
     solana_votor::{block_timeout, event::LeaderWindowInfo, votor::LeaderWindowNotifier},
     std::{
         sync::{
-            atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+            atomic::{AtomicBool, Ordering},
             Arc, Condvar, Mutex, RwLock,
         },
         thread,
@@ -79,19 +79,19 @@ pub struct ReplayHighestFrozen {
 struct BlockCreationLoopMetrics {
     last_report: u64,
     loop_count: u64,
-    bank_timeout_completion_count: AtomicUsize,
-    bank_filled_completion_count: AtomicUsize,
+    bank_timeout_completion_count: u64,
+    bank_filled_completion_count: u64,
 
-    window_production_elapsed: AtomicU64,
+    window_production_elapsed: u64,
     bank_completion_elapsed_hist: histogram::Histogram,
 }
 
 impl BlockCreationLoopMetrics {
     fn is_empty(&self) -> bool {
         0 == self.loop_count
-            + self.bank_timeout_completion_count.load(Ordering::Relaxed) as u64
-            + self.bank_filled_completion_count.load(Ordering::Relaxed) as u64
-            + self.window_production_elapsed.load(Ordering::Relaxed)
+            + self.bank_timeout_completion_count
+            + self.bank_filled_completion_count
+            + self.window_production_elapsed
             + self.bank_completion_elapsed_hist.entries()
     }
 
@@ -110,18 +110,17 @@ impl BlockCreationLoopMetrics {
                 ("loop_count", self.loop_count, i64),
                 (
                     "bank_timeout_completion_count",
-                    self.bank_timeout_completion_count
-                        .swap(0, Ordering::Relaxed),
+                    self.bank_timeout_completion_count,
                     i64
                 ),
                 (
                     "bank_filled_completion_count",
-                    self.bank_filled_completion_count.swap(0, Ordering::Relaxed),
+                    self.bank_filled_completion_count,
                     i64
                 ),
                 (
                     "window_production_elapsed",
-                    self.window_production_elapsed.swap(0, Ordering::Relaxed),
+                    self.window_production_elapsed,
                     i64
                 ),
                 (
@@ -148,7 +147,10 @@ impl BlockCreationLoopMetrics {
                 ),
             );
 
-            // .swap() resetted most of the metrics to 0, but not the histograms or non-atomic values. reset them.
+            // reset metrics
+            self.bank_timeout_completion_count = 0;
+            self.bank_filled_completion_count = 0;
+            self.window_production_elapsed = 0;
             self.bank_completion_elapsed_hist.clear();
             self.last_report = now;
         }
@@ -175,21 +177,13 @@ impl SlotMetrics {
             "slot-metrics",
             ("slot", self.slot, i64),
             ("attempt_count", self.attempt_count, i64),
-            (
-                "replay_is_behind_count",
-                self.replay_is_behind_count,
-                i64
-            ),
+            ("replay_is_behind_count", self.replay_is_behind_count, i64),
             (
                 "startup_verification_incomplete_count",
                 self.startup_verification_incomplete_count,
                 i64
             ),
-            (
-                "already_have_bank_count",
-                self.already_have_bank_count,
-                i64
-            ),
+            ("already_have_bank_count", self.already_have_bank_count, i64),
             (
                 "slot_delay_90pct",
                 self.slot_delay_hist.percentile(90.0).unwrap_or(0),
@@ -217,7 +211,9 @@ impl SlotMetrics {
             ),
             (
                 "replay_is_behind_wait_elapsed_90pct",
-                self.replay_is_behind_wait_elapsed_hist.percentile(90.0).unwrap_or(0),
+                self.replay_is_behind_wait_elapsed_hist
+                    .percentile(90.0)
+                    .unwrap_or(0),
                 i64
             ),
             (
@@ -227,12 +223,16 @@ impl SlotMetrics {
             ),
             (
                 "replay_is_behind_wait_elapsed_min",
-                self.replay_is_behind_wait_elapsed_hist.minimum().unwrap_or(0),
+                self.replay_is_behind_wait_elapsed_hist
+                    .minimum()
+                    .unwrap_or(0),
                 i64
             ),
             (
                 "replay_is_behind_wait_elapsed_max",
-                self.replay_is_behind_wait_elapsed_hist.maximum().unwrap_or(0),
+                self.replay_is_behind_wait_elapsed_hist
+                    .maximum()
+                    .unwrap_or(0),
                 i64
             ),
         );
@@ -437,9 +437,7 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                     );
 
                     // Record timeout completion metric
-                    metrics
-                        .bank_timeout_completion_count
-                        .fetch_add(1, Ordering::Relaxed);
+                    metrics.bank_timeout_completion_count += 1;
 
                     let max_tick_height = bank.max_tick_height();
                     // Set the tick height for the bank to max_tick_height - 1, so that PohRecorder::flush_cache()
@@ -455,9 +453,7 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                     trace!("{my_pubkey}: {slot} reached max tick height, moving to next block");
 
                     // Record filled completion metric
-                    metrics
-                        .bank_filled_completion_count
-                        .fetch_add(1, Ordering::Relaxed);
+                    metrics.bank_filled_completion_count += 1;
                 }
             }
 
@@ -487,9 +483,7 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
             }
         }
         window_production_start.stop();
-        metrics
-            .window_production_elapsed
-            .fetch_add(window_production_start.as_us(), Ordering::Relaxed);
+        metrics.window_production_elapsed += window_production_start.as_us();
         metrics.loop_count += 1;
         metrics.report(1000);
     }
@@ -534,7 +528,9 @@ fn start_leader_retry_replay(
             Ok(()) => {
                 // Record delay for successful slot
                 slot_delay_start.stop();
-                let _ = slot_metrics.slot_delay_hist.increment(slot_delay_start.as_us());
+                let _ = slot_metrics
+                    .slot_delay_hist
+                    .increment(slot_delay_start.as_us());
 
                 // slot was successful, report slot's metrics
                 slot_metrics.report();
