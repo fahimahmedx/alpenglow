@@ -79,31 +79,19 @@ pub struct ReplayHighestFrozen {
 struct BlockCreationLoopMetrics {
     last_report: u64,
     loop_count: u64,
-    replay_is_behind_count: AtomicUsize,
-    startup_verification_incomplete_count: AtomicUsize,
-    already_have_bank_count: AtomicUsize,
     bank_timeout_completion_count: AtomicUsize,
     bank_filled_completion_count: AtomicUsize,
 
-    replay_is_behind_wait_elapsed: AtomicU64,
     window_production_elapsed: AtomicU64,
-    slot_delay_hist: histogram::Histogram,
     bank_completion_elapsed_hist: histogram::Histogram,
 }
 
 impl BlockCreationLoopMetrics {
     fn is_empty(&self) -> bool {
         0 == self.loop_count
-            + self.replay_is_behind_count.load(Ordering::Relaxed) as u64
-            + self
-                .startup_verification_incomplete_count
-                .load(Ordering::Relaxed) as u64
-            + self.already_have_bank_count.load(Ordering::Relaxed) as u64
             + self.bank_timeout_completion_count.load(Ordering::Relaxed) as u64
             + self.bank_filled_completion_count.load(Ordering::Relaxed) as u64
-            + self.replay_is_behind_wait_elapsed.load(Ordering::Relaxed)
             + self.window_production_elapsed.load(Ordering::Relaxed)
-            + self.slot_delay_hist.entries()
             + self.bank_completion_elapsed_hist.entries()
     }
 
@@ -121,22 +109,6 @@ impl BlockCreationLoopMetrics {
                 "block-creation-loop-metrics",
                 ("loop_count", self.loop_count, i64),
                 (
-                    "replay_is_behind_count",
-                    self.replay_is_behind_count.swap(0, Ordering::Relaxed),
-                    i64
-                ),
-                (
-                    "startup_verification_incomplete_count",
-                    self.startup_verification_incomplete_count
-                        .swap(0, Ordering::Relaxed),
-                    i64
-                ),
-                (
-                    "already_have_bank_count",
-                    self.already_have_bank_count.swap(0, Ordering::Relaxed),
-                    i64
-                ),
-                (
                     "bank_timeout_completion_count",
                     self.bank_timeout_completion_count
                         .swap(0, Ordering::Relaxed),
@@ -148,34 +120,8 @@ impl BlockCreationLoopMetrics {
                     i64
                 ),
                 (
-                    "replay_is_behind_wait_elapsed",
-                    self.replay_is_behind_wait_elapsed
-                        .swap(0, Ordering::Relaxed),
-                    i64
-                ),
-                (
                     "window_production_elapsed",
                     self.window_production_elapsed.swap(0, Ordering::Relaxed),
-                    i64
-                ),
-                (
-                    "slot_delay_90pct",
-                    self.slot_delay_hist.percentile(90.0).unwrap_or(0),
-                    i64
-                ),
-                (
-                    "slot_delay_mean",
-                    self.slot_delay_hist.mean().unwrap_or(0),
-                    i64
-                ),
-                (
-                    "slot_delay_min",
-                    self.slot_delay_hist.minimum().unwrap_or(0),
-                    i64
-                ),
-                (
-                    "slot_delay_max",
-                    self.slot_delay_hist.maximum().unwrap_or(0),
                     i64
                 ),
                 (
@@ -203,10 +149,102 @@ impl BlockCreationLoopMetrics {
             );
 
             // .swap() resetted most of the metrics to 0, but not the histograms or non-atomic values. reset them.
-            self.slot_delay_hist.clear();
             self.bank_completion_elapsed_hist.clear();
             self.last_report = now;
         }
+    }
+}
+
+// Metrics on slots that we attempt to start a leader block for
+#[derive(Default)]
+struct SlotMetrics {
+    slot: Slot,
+    attempt_count: u64,
+    replay_is_behind_count: u64,
+    startup_verification_incomplete_count: u64,
+    already_have_bank_count: u64,
+
+    slot_delay_hist: histogram::Histogram,
+    replay_is_behind_cumulative_wait_elapsed: u64,
+    replay_is_behind_wait_elapsed_hist: histogram::Histogram,
+}
+
+impl SlotMetrics {
+    fn report(&mut self) {
+        datapoint_info!(
+            "slot-metrics",
+            ("slot", self.slot, i64),
+            ("attempt_count", self.attempt_count, i64),
+            (
+                "replay_is_behind_count",
+                self.replay_is_behind_count,
+                i64
+            ),
+            (
+                "startup_verification_incomplete_count",
+                self.startup_verification_incomplete_count,
+                i64
+            ),
+            (
+                "already_have_bank_count",
+                self.already_have_bank_count,
+                i64
+            ),
+            (
+                "slot_delay_90pct",
+                self.slot_delay_hist.percentile(90.0).unwrap_or(0),
+                i64
+            ),
+            (
+                "slot_delay_mean",
+                self.slot_delay_hist.mean().unwrap_or(0),
+                i64
+            ),
+            (
+                "slot_delay_min",
+                self.slot_delay_hist.minimum().unwrap_or(0),
+                i64
+            ),
+            (
+                "slot_delay_max",
+                self.slot_delay_hist.maximum().unwrap_or(0),
+                i64
+            ),
+            (
+                "replay_is_behind_cumulative_wait_elapsed",
+                self.replay_is_behind_cumulative_wait_elapsed,
+                i64
+            ),
+            (
+                "replay_is_behind_wait_elapsed_90pct",
+                self.replay_is_behind_wait_elapsed_hist.percentile(90.0).unwrap_or(0),
+                i64
+            ),
+            (
+                "replay_is_behind_wait_elapsed_mean",
+                self.replay_is_behind_wait_elapsed_hist.mean().unwrap_or(0),
+                i64
+            ),
+            (
+                "replay_is_behind_wait_elapsed_min",
+                self.replay_is_behind_wait_elapsed_hist.minimum().unwrap_or(0),
+                i64
+            ),
+            (
+                "replay_is_behind_wait_elapsed_max",
+                self.replay_is_behind_wait_elapsed_hist.maximum().unwrap_or(0),
+                i64
+            ),
+        );
+
+        // reset metrics
+        self.attempt_count = 0;
+        self.replay_is_behind_count = 0;
+        self.startup_verification_incomplete_count = 0;
+        self.already_have_bank_count = 0;
+        self.slot_delay_hist.clear();
+        self.replay_is_behind_cumulative_wait_elapsed = 0;
+        self.replay_is_behind_wait_elapsed_hist.clear();
     }
 }
 
@@ -303,6 +341,7 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
     };
 
     let mut metrics = BlockCreationLoopMetrics::default();
+    let mut slot_metrics = SlotMetrics::default();
 
     // Setup poh
     reset_poh_recorder(&ctx.bank_forks.read().unwrap().working_bank(), &ctx);
@@ -353,7 +392,7 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
         );
 
         if let Err(e) =
-            start_leader_retry_replay(start_slot, parent_slot, skip_timer, &ctx, &mut metrics)
+            start_leader_retry_replay(start_slot, parent_slot, skip_timer, &ctx, &mut slot_metrics)
         {
             // Give up on this leader window
             error!(
@@ -441,7 +480,7 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
             // Although `slot - 1`has been cleared from `poh_recorder`, it might not have finished processing in
             // `replay_stage`, which is why we use `start_leader_retry_replay`
             if let Err(e) =
-                start_leader_retry_replay(slot, slot - 1, skip_timer, &ctx, &mut metrics)
+                start_leader_retry_replay(slot, slot - 1, skip_timer, &ctx, &mut slot_metrics)
             {
                 error!("{my_pubkey}: Unable to produce {slot}, skipping rest of leader window {slot} - {end_slot}: {e:?}");
                 break;
@@ -482,24 +521,28 @@ fn start_leader_retry_replay(
     parent_slot: Slot,
     skip_timer: Instant,
     ctx: &LeaderContext,
-    metrics: &mut BlockCreationLoopMetrics,
+    slot_metrics: &mut SlotMetrics,
 ) -> Result<(), StartLeaderError> {
     let my_pubkey = ctx.my_pubkey;
     let timeout = block_timeout(leader_slot_index(slot));
     let mut slot_delay_start = Measure::start("slot_delay");
     while !timeout.saturating_sub(skip_timer.elapsed()).is_zero() {
-        match maybe_start_leader(slot, parent_slot, ctx, metrics) {
+        // Count attempts to start a leader block
+        slot_metrics.attempt_count += 1;
+
+        match maybe_start_leader(slot, parent_slot, ctx, slot_metrics) {
             Ok(()) => {
                 // Record delay for successful slot
                 slot_delay_start.stop();
-                let _ = metrics.slot_delay_hist.increment(slot_delay_start.as_us());
+                let _ = slot_metrics.slot_delay_hist.increment(slot_delay_start.as_us());
+
+                // slot was successful, report slot's metrics
+                slot_metrics.report();
 
                 return Ok(());
             }
             Err(StartLeaderError::ReplayIsBehind(_)) => {
-                metrics
-                    .replay_is_behind_count
-                    .fetch_add(1, Ordering::Relaxed);
+                // slot_metrics.replay_is_behind_count already gets incremented in maybe_start_leader
 
                 trace!(
                     "{my_pubkey}: Attempting to produce slot {slot}, however replay of the \
@@ -524,17 +567,15 @@ fn start_leader_retry_replay(
                     )
                     .unwrap();
                 wait_start.stop();
-                metrics
-                    .replay_is_behind_wait_elapsed
-                    .fetch_add(wait_start.as_us(), Ordering::Relaxed);
+                slot_metrics.replay_is_behind_cumulative_wait_elapsed += wait_start.as_us();
+                let _ = slot_metrics
+                    .replay_is_behind_wait_elapsed_hist
+                    .increment(wait_start.as_us());
             }
             Err(e) => return Err(e),
         }
     }
 
-    metrics
-        .replay_is_behind_count
-        .fetch_add(1, Ordering::Relaxed);
     error!(
         "{my_pubkey}: Skipping production of {slot}: \
         Unable to replay parent {parent_slot} in time"
@@ -555,33 +596,25 @@ fn maybe_start_leader(
     slot: Slot,
     parent_slot: Slot,
     ctx: &LeaderContext,
-    metrics: &mut BlockCreationLoopMetrics,
+    slot_metrics: &mut SlotMetrics,
 ) -> Result<(), StartLeaderError> {
     if ctx.bank_forks.read().unwrap().get(slot).is_some() {
-        metrics
-            .already_have_bank_count
-            .fetch_add(1, Ordering::Relaxed);
+        slot_metrics.already_have_bank_count += 1;
         return Err(StartLeaderError::AlreadyHaveBank(slot));
     }
 
     let Some(parent_bank) = ctx.bank_forks.read().unwrap().get(parent_slot) else {
-        metrics
-            .replay_is_behind_count
-            .fetch_add(1, Ordering::Relaxed);
+        slot_metrics.replay_is_behind_count += 1;
         return Err(StartLeaderError::ReplayIsBehind(parent_slot));
     };
 
     if !parent_bank.is_frozen() {
-        metrics
-            .replay_is_behind_count
-            .fetch_add(1, Ordering::Relaxed);
+        slot_metrics.replay_is_behind_count += 1;
         return Err(StartLeaderError::ReplayIsBehind(parent_slot));
     }
 
     if !parent_bank.is_startup_verification_complete() {
-        metrics
-            .startup_verification_incomplete_count
-            .fetch_add(1, Ordering::Relaxed);
+        slot_metrics.startup_verification_incomplete_count += 1;
         return Err(StartLeaderError::StartupVerificationIncomplete(parent_slot));
     }
 
