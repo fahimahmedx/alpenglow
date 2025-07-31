@@ -89,15 +89,14 @@ use {
         BroadcastStageType,
     },
     solana_vote::{
-        alpenglow::{
-            bls_message::{BLSMessage, VoteMessage, BLS_KEYPAIR_DERIVE_SEED},
-            certificate::CertificateType,
-            vote::Vote,
-        },
         vote_parser::{self},
         vote_transaction,
     },
     solana_vote_program::vote_state::MAX_LOCKOUT_HISTORY,
+    solana_votor_messages::{
+        bls_message::{BLSMessage, CertificateType, VoteMessage, BLS_KEYPAIR_DERIVE_SEED},
+        vote::Vote,
+    },
     std::{
         collections::{BTreeSet, HashMap, HashSet},
         fs,
@@ -6633,8 +6632,7 @@ fn test_alpenglow_ensure_liveness_after_double_notar_fallback() {
             let vote = &vote_message.vote;
             let vote_b = if self.a_equivocates && vote.is_notarization() {
                 let new_block_id = Hash::new_unique();
-                let new_bank_hash = Hash::new_unique();
-                Vote::new_notarization_vote(vote.slot(), new_block_id, new_bank_hash)
+                Vote::new_notarization_vote(vote.slot(), new_block_id)
             } else {
                 *vote
             };
@@ -7033,9 +7031,9 @@ fn test_alpenglow_ensure_liveness_after_intertwined_notar_and_skip_fallbacks() {
                         // Stage 3: Verify continued liveness after partition resolution
                         if experiment_state.stage == Stage::ObserveLiveness
                             && [CertificateType::Finalize, CertificateType::FinalizeFast]
-                                .contains(&cert_message.certificate.certificate_type)
+                                .contains(&cert_message.certificate.certificate_type())
                         {
-                            experiment_state.record_certificate(cert_message.certificate.slot);
+                            experiment_state.record_certificate(cert_message.certificate.slot());
 
                             if experiment_state.sufficient_roots_created() {
                                 break;
@@ -7318,9 +7316,9 @@ fn test_alpenglow_ensure_liveness_after_second_notar_fallback_condition() {
                     BLSMessage::Certificate(cert_message) => {
                         // Check for finalization certificates to determine test completion
                         if [CertificateType::Finalize, CertificateType::FinalizeFast]
-                            .contains(&cert_message.certificate.certificate_type)
+                            .contains(&cert_message.certificate.certificate_type())
                         {
-                            experiment_state.record_certificate(cert_message.certificate.slot);
+                            experiment_state.record_certificate(cert_message.certificate.slot());
 
                             if experiment_state.sufficient_roots_created() {
                                 break;

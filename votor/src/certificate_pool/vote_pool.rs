@@ -2,7 +2,7 @@ use {
     crate::{certificate_pool::vote_certificate_builder::VoteCertificateBuilder, Stake},
     solana_pubkey::Pubkey,
     solana_sdk::hash::Hash,
-    solana_vote::alpenglow::bls_message::VoteMessage,
+    solana_votor_messages::bls_message::VoteMessage,
     std::collections::{HashMap, HashSet},
 };
 
@@ -221,7 +221,7 @@ mod test {
     use {
         super::*,
         solana_bls_signatures::Signature as BLSSignature,
-        solana_vote::alpenglow::{bls_message::VoteMessage, vote::Vote},
+        solana_votor_messages::{bls_message::VoteMessage, vote::Vote},
     };
 
     #[test]
@@ -253,8 +253,7 @@ mod test {
         let mut vote_pool = DuplicateBlockVotePool::new(1);
         let my_pubkey = Pubkey::new_unique();
         let block_id = Hash::new_unique();
-        let bank_hash = Hash::new_unique();
-        let vote = Vote::new_notarization_vote(3, block_id, bank_hash);
+        let vote = Vote::new_notarization_vote(3, block_id);
         let transaction = VoteMessage {
             vote,
             signature: BLSSignature::default(),
@@ -283,7 +282,7 @@ mod test {
     fn test_notarization_fallback_pool() {
         solana_logger::setup();
         let mut vote_pool = DuplicateBlockVotePool::new(3);
-        let vote = Vote::new_notarization_fallback_vote(7, Hash::new_unique(), Hash::default());
+        let vote = Vote::new_notarization_fallback_vote(7, Hash::new_unique());
         let transaction = VoteMessage {
             vote,
             signature: BLSSignature::default(),

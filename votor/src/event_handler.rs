@@ -10,7 +10,6 @@ use {
         vote_history::{VoteHistory, VoteHistoryError},
         voting_utils::{self, BLSOp, VoteError, VotingContext},
         votor::{SharedContext, Votor},
-        Block,
     },
     crossbeam_channel::{select, RecvError, SendError},
     solana_ledger::leader_schedule_utils::{
@@ -19,7 +18,7 @@ use {
     solana_pubkey::Pubkey,
     solana_runtime::{bank::Bank, bank_forks::SetRootError},
     solana_sdk::{clock::Slot, hash::Hash, signature::Signer},
-    solana_vote::alpenglow::vote::Vote,
+    solana_votor_messages::{bls_message::Block, vote::Vote},
     std::{
         collections::{BTreeMap, BTreeSet},
         sync::{
@@ -236,7 +235,7 @@ impl EventHandler {
                 info!("{my_pubkey}: Voting notarize-fallback for {slot} {block_id}");
                 votes.push(voting_utils::insert_vote_and_create_bls_message(
                     my_pubkey,
-                    Vote::new_notarization_fallback_vote(slot, block_id, Hash::default()),
+                    Vote::new_notarization_fallback_vote(slot, block_id),
                     false,
                     vctx,
                 ));
@@ -397,11 +396,11 @@ impl EventHandler {
         info!("{my_pubkey}: Voting notarize for {slot} {block_id}");
         votes.push(voting_utils::insert_vote_and_create_bls_message(
             my_pubkey,
-            Vote::new_notarization_vote(slot, block_id, Hash::default()),
+            Vote::new_notarization_vote(slot, block_id),
             false,
             voting_context,
         ));
-        alpenglow_update_commitment_cache(
+        let _ = alpenglow_update_commitment_cache(
             AlpenglowCommitmentType::Notarize,
             slot,
             &voting_context.commitment_sender,
