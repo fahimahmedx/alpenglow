@@ -82,7 +82,8 @@ struct BlockCreationLoopMetrics {
     bank_filled_completion_count: u64,
 
     window_production_elapsed: u64,
-    bank_completion_elapsed_hist: histogram::Histogram,
+    bank_filled_completion_elapsed_hist: histogram::Histogram,
+    bank_timeout_completion_elapsed_hist: histogram::Histogram,
 }
 
 impl BlockCreationLoopMetrics {
@@ -91,7 +92,8 @@ impl BlockCreationLoopMetrics {
             + self.bank_timeout_completion_count
             + self.bank_filled_completion_count
             + self.window_production_elapsed
-            + self.bank_completion_elapsed_hist.entries()
+            + self.bank_filled_completion_elapsed_hist.entries()
+            + self.bank_timeout_completion_elapsed_hist.entries()
     }
 
     fn report(&mut self, report_interval_ms: u64) {
@@ -123,25 +125,47 @@ impl BlockCreationLoopMetrics {
                     i64
                 ),
                 (
-                    "bank_completion_elapsed_90pct",
-                    self.bank_completion_elapsed_hist
+                    "bank_filled_completion_elapsed_90pct",
+                    self.bank_filled_completion_elapsed_hist
                         .percentile(90.0)
                         .unwrap_or(0),
                     i64
                 ),
                 (
-                    "bank_completion_elapsed_mean",
-                    self.bank_completion_elapsed_hist.mean().unwrap_or(0),
+                    "bank_filled_completion_elapsed_mean",
+                    self.bank_filled_completion_elapsed_hist.mean().unwrap_or(0),
                     i64
                 ),
                 (
-                    "bank_completion_elapsed_min",
-                    self.bank_completion_elapsed_hist.minimum().unwrap_or(0),
+                    "bank_filled_completion_elapsed_min",
+                    self.bank_filled_completion_elapsed_hist.minimum().unwrap_or(0),
                     i64
                 ),
                 (
-                    "bank_completion_elapsed_max",
-                    self.bank_completion_elapsed_hist.maximum().unwrap_or(0),
+                    "bank_filled_completion_elapsed_max",
+                    self.bank_filled_completion_elapsed_hist.maximum().unwrap_or(0),
+                    i64
+                ),
+                (
+                    "bank_timeout_completion_elapsed_90pct",
+                    self.bank_timeout_completion_elapsed_hist
+                        .percentile(90.0)
+                        .unwrap_or(0),
+                    i64
+                ),
+                (
+                    "bank_timeout_completion_elapsed_mean",
+                    self.bank_timeout_completion_elapsed_hist.mean().unwrap_or(0),
+                    i64
+                ),
+                (
+                    "bank_timeout_completion_elapsed_min",
+                    self.bank_timeout_completion_elapsed_hist.minimum().unwrap_or(0),
+                    i64
+                ),
+                (
+                    "bank_timeout_completion_elapsed_max",
+                    self.bank_timeout_completion_elapsed_hist.maximum().unwrap_or(0),
                     i64
                 ),
             );
@@ -150,7 +174,8 @@ impl BlockCreationLoopMetrics {
             self.bank_timeout_completion_count = 0;
             self.bank_filled_completion_count = 0;
             self.window_production_elapsed = 0;
-            self.bank_completion_elapsed_hist.clear();
+            self.bank_filled_completion_elapsed_hist.clear();
+            self.bank_timeout_completion_elapsed_hist.clear();
             self.last_report = now;
         }
     }
@@ -420,6 +445,8 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
 
             leader_bank_notifier.wait_for_completed(remaining_slot_time);
 
+            bank_completion_measure.stop();
+
             // Time to complete the bank, there are two possibilities:
             // (1) We hit the block timeout, the bank is still present we must clear it
             // (2) The bank has filled up and been cleared by banking stage
@@ -436,6 +463,11 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
                     // Record timeout completion metric
                     metrics.bank_timeout_completion_count += 1;
 
+                    // Record bank timeout completion time
+                    let _ = metrics
+                        .bank_timeout_completion_elapsed_hist
+                        .increment(bank_completion_measure.as_us());
+
                     let max_tick_height = bank.max_tick_height();
                     // Set the tick height for the bank to max_tick_height - 1, so that PohRecorder::flush_cache()
                     // will properly increment the tick_height to max_tick_height.
@@ -451,17 +483,16 @@ pub fn start_loop(config: BlockCreationLoopConfig) {
 
                     // Record filled completion metric
                     metrics.bank_filled_completion_count += 1;
+
+                    // Record bank filled completion time
+                    let _ = metrics
+                        .bank_filled_completion_elapsed_hist
+                        .increment(bank_completion_measure.as_us());
                 }
             }
 
             // Assert that the bank has been cleared
             assert!(!poh_recorder.read().unwrap().has_bank());
-
-            // Record bank completion time
-            bank_completion_measure.stop();
-            let _ = metrics
-                .bank_completion_elapsed_hist
-                .increment(bank_completion_measure.as_us());
 
             // Produce our next slot
             slot += 1;
