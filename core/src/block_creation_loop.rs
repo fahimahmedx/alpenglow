@@ -23,6 +23,7 @@ use {
         bank::{Bank, NewBankOptions},
         bank_forks::BankForks,
     },
+    solana_time_utils::timestamp,
     solana_votor::{block_timeout, event::LeaderWindowInfo, votor::LeaderWindowNotifier},
     std::{
         sync::{
@@ -138,12 +139,16 @@ impl BlockCreationLoopMetrics {
                 ),
                 (
                     "bank_filled_completion_elapsed_min",
-                    self.bank_filled_completion_elapsed_hist.minimum().unwrap_or(0),
+                    self.bank_filled_completion_elapsed_hist
+                        .minimum()
+                        .unwrap_or(0),
                     i64
                 ),
                 (
                     "bank_filled_completion_elapsed_max",
-                    self.bank_filled_completion_elapsed_hist.maximum().unwrap_or(0),
+                    self.bank_filled_completion_elapsed_hist
+                        .maximum()
+                        .unwrap_or(0),
                     i64
                 ),
                 (
@@ -155,17 +160,23 @@ impl BlockCreationLoopMetrics {
                 ),
                 (
                     "bank_timeout_completion_elapsed_mean",
-                    self.bank_timeout_completion_elapsed_hist.mean().unwrap_or(0),
+                    self.bank_timeout_completion_elapsed_hist
+                        .mean()
+                        .unwrap_or(0),
                     i64
                 ),
                 (
                     "bank_timeout_completion_elapsed_min",
-                    self.bank_timeout_completion_elapsed_hist.minimum().unwrap_or(0),
+                    self.bank_timeout_completion_elapsed_hist
+                        .minimum()
+                        .unwrap_or(0),
                     i64
                 ),
                 (
                     "bank_timeout_completion_elapsed_max",
-                    self.bank_timeout_completion_elapsed_hist.maximum().unwrap_or(0),
+                    self.bank_timeout_completion_elapsed_hist
+                        .maximum()
+                        .unwrap_or(0),
                     i64
                 ),
             );
